@@ -40,14 +40,14 @@ router.post('/register', async (req, res) => {
   // Insert into public.users (the DB trigger does this automatically,
   // but we do it manually here as a fallback / explicit control)
   const { error: profileError } = await supabaseAdmin
-    .from('users')
-    .upsert({
-      id:    authData.user.id,
-      email: authData.user.email,
-      name,
-      role
-    });
-
+  .from('users')
+  .upsert({
+    id: authData.user.id,
+    email: authData.user.email,
+    name,
+    role,
+    created_at: new Date().toISOString() // ✅ ensures no NULL
+  });
   if (profileError) {
     console.error('Profile insert error:', profileError);
     // Don't fail — auth user was created, profile upsert is recoverable
@@ -99,9 +99,9 @@ router.get('/me', authenticate, (req, res) => {
 
 // ─── ADMIN: LIST ALL USERS (paginated) ───────────────────────────────────────
 router.get('/users', authenticate, requireRole('admin'), async (req, res) => {
-  // ── Pagination params ──
+
   const page  = Math.max(1, parseInt(req.query.page)  || 1);
-  const limit = Math.min(100, parseInt(req.query.limit) || 10);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10)); // ✅ respect limit param, default 10
   const from  = (page - 1) * limit;
   const to    = from + limit - 1;
 
@@ -109,6 +109,7 @@ router.get('/users', authenticate, requireRole('admin'), async (req, res) => {
     .from('users')
     .select('id, email, name, role, created_at', { count: 'exact' })
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .range(from, to);
 
   if (error) {
@@ -117,7 +118,7 @@ router.get('/users', authenticate, requireRole('admin'), async (req, res) => {
 
   res.json({
     data,
-    total:      count,
+    total: count,
     page,
     limit,
     totalPages: Math.ceil(count / limit),
