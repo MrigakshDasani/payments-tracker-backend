@@ -16,6 +16,20 @@ router.use(blockVendor);  // Vendors cannot access purchase order data
 // ─── GET ALL POs ──────────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
+    // ── Pagination params ──
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 10);
+    const from  = (page - 1) * limit;
+    const to    = from + limit - 1;
+
+    // First get total count of POs (without payments join for accuracy)
+    const { count, error: countError } = await supabaseAdmin
+      .from('purchase_orders')
+      .select('id', { count: 'exact', head: true }); // head:true = count only, no rows
+
+    if (countError) throw countError;
+
+    // Then get paginated page with full data
     const { data, error } = await supabaseAdmin
       .from('purchase_orders')
       .select(`
@@ -28,7 +42,8 @@ router.get('/', async (req, res) => {
         created_by,
         payments ( id, amount, status )
       `)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(from, to);             // ← server-side slice
 
     if (error) throw error;
 
@@ -53,7 +68,13 @@ router.get('/', async (req, res) => {
       };
     });
 
-    res.json({ data: enriched, count: enriched.length });
+    res.json({
+      data:       enriched,
+      total:      count,             // ← total PO count for frontend pagination
+      page,
+      limit,
+      totalPages: Math.ceil(count / limit),
+    });
   } catch (err) {
     console.error('GET /purchase-orders:', err);
     res.status(500).json({ error: err.message });

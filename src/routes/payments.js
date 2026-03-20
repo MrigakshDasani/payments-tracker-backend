@@ -26,6 +26,12 @@ router.get('/', async (req, res) => {
   try {
     const { status, po_id, type, overdue } = req.query;
 
+    // ── Pagination params ──
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 10);
+    const from  = (page - 1) * limit;
+    const to    = from + limit - 1;
+
     let query = supabaseAdmin
       .from('payments')
       .select(`
@@ -34,24 +40,32 @@ router.get('/', async (req, res) => {
         approved_at, paid_at, created_at,
         po_id,
         purchase_orders ( id, po_number, vendor_name, total_amount, payment_terms )
-      `)
-      .order('due_date', { ascending: true });
+      `, { count: 'exact' })        // ← tells Supabase to return total count
+      .order('due_date', { ascending: true })
+      .range(from, to);              // ← server-side slice
 
     if (status) query = query.eq('status', status);
     if (po_id)  query = query.eq('po_id', po_id);
     if (type)   query = query.eq('type', type);
 
-    const { data, error } = await query;
+    const { data, count, error } = await query;
     if (error) throw error;
 
     let result = data.map(withOverdue);
 
-    // Filter overdue on the server side (can't do date < today in Supabase filter easily)
+    // Filter overdue after fetch (can't do date comparison in Supabase filter easily)
+    // Note: overdue filter fetches all then filters — use sparingly on large datasets
     if (overdue === 'true') {
       result = result.filter(p => p.is_overdue);
     }
 
-    res.json({ data: result, count: result.length });
+    res.json({
+      data:       result,
+      total:      count,            // ← total records matching filters (before pagination)
+      page,
+      limit,
+      totalPages: Math.ceil(count / limit),
+    });
   } catch (err) {
     console.error('GET /payments:', err);
     res.status(500).json({ error: err.message });

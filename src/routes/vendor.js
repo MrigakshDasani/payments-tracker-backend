@@ -32,8 +32,14 @@ router.get('/my-notifications', async (req, res) => {
 
     const poIds = pos.map(p => p.id);
 
+    // ── Pagination params ──
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 10);
+    const from  = (page - 1) * limit;
+    const to    = from + limit - 1;
+
     // Get only Paid + vendor_notified payments for those POs
-    const { data: payments, error: payError } = await supabaseAdmin
+    const { data: payments, count, error: payError } = await supabaseAdmin
       .from('payments')
       .select(`
         id,
@@ -44,11 +50,12 @@ router.get('/my-notifications', async (req, res) => {
         vendor_notified,
         paid_at,
         purchase_orders ( po_number, vendor_name )
-      `)
+      `, { count: 'exact' })        // ← return total count
       .in('po_id', poIds)
       .eq('status', 'Paid')
       .eq('vendor_notified', true)
-      .order('paid_at', { ascending: false });
+      .order('paid_at', { ascending: false })
+      .range(from, to);             // ← paginate
 
     if (payError) throw payError;
 
@@ -64,9 +71,12 @@ router.get('/my-notifications', async (req, res) => {
     }));
 
     res.json({
-      vendor: req.user.name,
-      total_notifications: vendorView.length,
-      data: vendorView
+      vendor:              req.user.name,
+      total_notifications: count,   // ← total across all pages
+      page,
+      limit,
+      totalPages:          Math.ceil(count / limit),
+      data:                vendorView,
     });
   } catch (err) {
     console.error('GET /vendor/my-notifications:', err);
