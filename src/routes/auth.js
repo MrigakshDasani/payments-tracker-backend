@@ -81,7 +81,7 @@ router.post('/login', async (req, res) => {
     .single();
 
   res.json({
-    token:        data.session.access_token,
+    token:         data.session.access_token,
     refresh_token: data.session.refresh_token,
     user: {
       id:    data.user.id,
@@ -97,18 +97,31 @@ router.get('/me', authenticate, (req, res) => {
   res.json({ user: req.user });
 });
 
-// ─── ADMIN: LIST ALL USERS ────────────────────────────────────────────────────
+// ─── ADMIN: LIST ALL USERS (paginated) ───────────────────────────────────────
 router.get('/users', authenticate, requireRole('admin'), async (req, res) => {
-  const { data, error } = await supabaseAdmin
+  // ── Pagination params ──
+  const page  = Math.max(1, parseInt(req.query.page)  || 1);
+  const limit = Math.min(100, parseInt(req.query.limit) || 10);
+  const from  = (page - 1) * limit;
+  const to    = from + limit - 1;
+
+  const { data, count, error } = await supabaseAdmin
     .from('users')
-    .select('id, email, name, role, created_at')
-    .order('created_at', { ascending: false });
+    .select('id, email, name, role, created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
 
   if (error) {
     return res.status(500).json({ error: error.message });
   }
 
-  res.json({ data });
+  res.json({
+    data,
+    total:      count,
+    page,
+    limit,
+    totalPages: Math.ceil(count / limit),
+  });
 });
 
 // ─── ADMIN: UPDATE USER ROLE ────────────────────────────────────────────────
@@ -153,4 +166,5 @@ router.patch('/role/:id', authenticate, requireRole('admin'), async (req, res) =
 
   res.json({ message: 'User role updated successfully', user: data[0] });
 });
+
 export default router;
